@@ -1,119 +1,79 @@
-# Desafio Técnico - http-server-projeto-korp
+# Servidor HTTP com Monitoramento e Automação Ansible
 
-Este repositório contém a resolução do desafio técnico de DevOps/Infraestrutura. O projeto engloba a criação de um serviço HTTP instrumentado em Go, orquestração de containers com Docker Compose, configuração de proxy reverso com Nginx, monitoramento completo com Prometheus/Grafana e automação de implantação via Ansible.
+Este repositório contém a solução desenvolvida para o desafio de infraestrutura e automação. O projeto consiste em um serviço HTTP escrito em Go, containerizado com Docker, utilizando o Nginx como proxy reverso para controle de tráfego, Prometheus e Grafana para monitoramento de métricas, e um playbook Ansible para a automação do provisionamento.
 
----
+## Arquitetura do Ambiente
 
-## 🏗️ Arquitetura do Ambiente
+A infraestrutura foi projetada para garantir isolamento de rede e simplicidade no gerenciamento:
 
-A arquitetura do projeto foi desenhada visando segurança, isolamento de rede e observabilidade:
+- **Isolamento de Rede:** O serviço em Go (`http-server-projeto-korp`) roda na porta interna 8080 e não publica suas portas para o host externo. Ele pertence exclusivamente à rede virtual interna `korp-network`.
+- **Proxy Reverso:** O Nginx atua como único ponto de entrada público na porta 80, redirecionando as chamadas para a rota `/projeto-korp` no container Go.
+- **Segurança de Containers:** O Dockerfile da aplicação utiliza um processo de build em dois estágios (multi-stage) e define a execução sob um usuário comum (`appuser`), evitando privilégios de root.
+- **Provisionamento Automático:** O Grafana carrega de forma nativa o Prometheus como datasource padrão e importa o dashboard de monitoramento pré-configurado (`dashboard.json`) ao ser iniciado.
 
-```
-[ Cliente ] 
-     │ (Porta 80)
-     ▼
-┌──────────────────────────────────────────┐
-│              nginx-proxy                 │
-└────────────────────┬─────────────────────┘
-                     │ (Rede Bridge: korp-network)
-                     ▼
-┌──────────────────────────────────────────┐
-│      http-server-projeto-korp            │ (Porta 8080 - Não exposta ao Host)
-└────────────────────┬─────────────────────┘
-                     │
-                     ├─────────────────────┐
-                     ▼                     ▼
-┌──────────────────────────┐   ┌──────────────────────────┐
-│        Prometheus        │   │         Grafana          │
-│      (Porta 9090)        │   │       (Porta 3000)       │
-└──────────────────────────┘   └──────────────────────────┘
-```
-
-### Decisões de Arquitetura:
-1. **Linguagem Go**: Escolhida por sua alta performance, baixo consumo de CPU/Memória, suporte nativo a concorrência e facilidade de integração com bibliotecas nativas de métricas do ecossistema Cloud Native (Prometheus).
-2. **Isolamento de Rede (Segurança)**: A aplicação Go roda internamente na rede bridge `korp-network` exposta na porta `8080`. Ela **não expõe portas ao Host**, impossibilitando acesso externo direto. Todo o tráfego externo passa obrigatoriamente pelo Nginx na porta `80` atuando como Proxy Reverso.
-3. **Dockerfile Otimizado (Multi-Stage)**:
-   - **Estágio de build**: Utiliza uma imagem Go leve baseada em Alpine para compilar o executável estático, removendo símbolos de depuração (`-ldflags="-w -s"`) para reduzir o tamanho.
-   - **Estágio de execução**: Utiliza uma imagem mínima do Alpine contendo apenas o binário compilado.
-   - **Non-Root**: A aplicação executa sob um usuário sem privilégios (`appuser`), garantindo conformidade com as melhores práticas de segurança de containers (evitando escalada de privilégios).
-4. **Grafana Automatizado (Provisionamento)**: O Grafana está configurado para carregar automaticamente o Prometheus como Datasource padrão e renderizar o dashboard pré-configurado (`dashboard.json`) ao ser iniciado, sem necessidade de qualquer clique manual.
-
----
-
-## 📂 Estrutura do Projeto
+## Estrutura de Arquivos
 
 ```
 projeto-korp/
 ├── app/
-│   ├── main.go         # Servidor HTTP Go instrumentado com métricas Prometheus
-│   ├── go.mod          # Definição das dependências do Go
-│   └── Dockerfile      # Dockerfile multi-stage e seguro (non-root)
+│   ├── main.go         # Código fonte da API em Go
+│   ├── go.mod          # Módulo e dependências do Go
+│   └── Dockerfile      # Dockerfile otimizado da aplicação
 ├── infra/
 │   ├── nginx/
-│   │   └── http-server-projeto-korp.conf # Arquivo de Proxy Reverso do Nginx
+│   │   └── http-server-projeto-korp.conf # Configuração do proxy reverso
 │   ├── prometheus/
-│   │   └── prometheus.yml                # Configuração de scraping do Prometheus
+│   │   └── prometheus.yml                # Configuração do coletor de métricas
 │   └── grafana/
 │       ├── datasources/
-│       │   └── datasource.yml            # Provisionamento automático da fonte de dados
+│       │   └── datasource.yml            # Definição automática de fonte de dados
 │       └── dashboards/
-│           ├── dashboard.yml            # Configuração de carregamento do dashboard
-│           └── dashboard.json            # Layout JSON do painel de monitoramento
-├── docker-compose.yml  # Definição e orquestração de todos os containers
-└── playbook.yml        # Playbook Ansible para automatizar 100% o provisionamento do zero
+│           ├── dashboard.yml             # Mapeamento do dashboard do Grafana
+│           └── dashboard.json            # Estrutura visual do painel de monitoramento
+├── docker-compose.yml  # Orquestração local de todos os containers
+└── playbook.yml        # Automação Ansible para instalação e deploy
 ```
 
----
-
-## 🚀 Como Executar e Validar
+## Como Executar e Testar
 
 ### Pré-requisitos
-* Docker e Docker Compose instalados no host.
-* *Opcional:* Ansible (caso queira realizar o provisionamento automatizado por playbook).
+Certifique-se de possuir o Docker e o Docker Compose instalados no host de execução.
 
----
+### Execução local via Docker Compose
 
-### Opção A: Execução Direta (Docker Compose)
-
-1. Entre no diretório do projeto:
+1. Navegue até o diretório do projeto:
    ```bash
    cd projeto-korp
    ```
-2. Inicie a pilha de serviços em segundo plano:
+2. Inicialize os serviços em segundo plano:
    ```bash
    docker compose up --build -d
    ```
-3. Valide o funcionamento do serviço consumindo o endpoint pelo Nginx:
+3. Teste o funcionamento do endpoint HTTP:
    ```bash
    curl http://localhost/projeto-korp
    ```
-   **Resposta Esperada (JSON Dinâmico):**
+   **Retorno esperado:**
    ```json
    {"nome":"Projeto Korp","horario":"2026-05-27T19:38:34Z"}
    ```
 
----
+### Implantação Automatizada com Ansible
 
-### Opção B: Implantação Automatizada (Ansible)
+O playbook Ansible foi construído para preparar todo o ambiente (instalando o Docker se necessário em ambientes Debian/Ubuntu), configurar a rede, compilar os containers locais e verificar a resposta final da aplicação no console.
 
-O playbook Ansible instala as dependências, cria a rede bridge, compila as imagens locais, orquestra os containers e realiza um teste de fumaça retornando a resposta da requisição HTTP no console em um único comando.
-
-Para testar localmente (localhost):
+Para testar localmente, execute:
 ```bash
 ansible-playbook -i "localhost," -c local playbook.yml
 ```
 
----
+## Monitoramento
 
-## 📊 Monitoramento e Observabilidade
+O monitoramento pode ser acessado localmente através das portas mapeadas:
 
-* **Prometheus UI**: Disponível em [http://localhost:9090](http://localhost:9090)
-* **Grafana Dashboard**: Disponível em [http://localhost:3000](http://localhost:3000)
-  * **Usuário**: `admin`
-  * **Senha**: `admin`
+- **Prometheus UI:** http://localhost:9090
+- **Grafana Dashboard:** http://localhost:3000 (Credenciais: admin / admin)
 
-### Painéis do Dashboard Customizado:
-1. **Disponibilidade do Serviço**: Exibe `ONLINE` em verde se a aplicação estiver saudável, e `OFFLINE` em vermelho caso o container do Go pare.
-2. **Tempo de Uptime (Atividade)**: Exibe em tempo real há quanto tempo a aplicação está ativa.
-3. **Volume de Requisições**: Contador incremental que mede o volume total acumulado de requisições.
-4. **Taxa de RPS (Requisições por Segundo)**: Gráfico de linha que exibe a taxa de tráfego por segundo segmentada por código de status HTTP (ex: 200 OK, 405 Method Not Allowed, 500 Server Error).
+### Métricas Coletadas
+- **Disponibilidade (Uptime):** Indicada pela métrica nativa `up` e pela métrica `korp_service_uptime_seconds`, exibindo o tempo de atividade acumulado da API.
+- **Volume de Requisições:** Contagem total de chamadas HTTP feitas à aplicação, segmentada no dashboard de RPS (Requisições por Segundo) pelos respectivos códigos de status HTTP (como 200 e 405).

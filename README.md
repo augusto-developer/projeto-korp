@@ -1,7 +1,5 @@
 # Servidor HTTP com Monitoramento e Automação Ansible
 
-Este repositório contém a solução desenvolvida para o desafio de infraestrutura e automação. O projeto consiste em um serviço HTTP escrito em Go, containerizado com Docker, utilizando o Nginx como proxy reverso para controle de tráfego, Prometheus e Grafana para monitoramento de métricas, e um playbook Ansible para a automação do provisionamento.
-
 ## Arquitetura do Ambiente
 
 A infraestrutura foi projetada para garantir isolamento de rede e simplicidade no gerenciamento:

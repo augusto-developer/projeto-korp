@@ -1,0 +1,68 @@
+version: '3.8'
+
+networks:
+  korp-network:
+    driver: bridge
+
+services:
+  # Serviço HTTP escrito em Go
+  http-server-projeto-korp:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: http-server-projeto-korp
+    networks:
+      - korp-network
+    # Não expõe portas diretamente ao host (somente acessível internamente na rede do Docker)
+    expose:
+      - "8080"
+    restart: unless-stopped
+
+  # Proxy Reverso Nginx
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy-korp
+    ports:
+      - "80:80"
+    volumes:
+      # Monta o diretório contendo o arquivo de configuração de proxy reverso
+      - ./infra/nginx:/etc/nginx/conf.d:ro
+    networks:
+      - korp-network
+    depends_on:
+      - http-server-projeto-korp
+    restart: unless-stopped
+
+  # Coletor de Métricas Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus-korp
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - korp-network
+    depends_on:
+      - http-server-projeto-korp
+    restart: unless-stopped
+
+  # Visualizador de Métricas Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-korp
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      # Provisionamento automático de datasource e dashboard
+      - ./infra/grafana/datasources/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro
+      - ./infra/grafana/dashboards/dashboard.yml:/etc/grafana/provisioning/dashboards/dashboard.yml:ro
+      - ./infra/grafana/dashboards/dashboard.json:/var/lib/grafana/dashboards/dashboard.json:ro
+    networks:
+      - korp-network
+    depends_on:
+      - prometheus
+    restart: unless-stopped

@@ -1,0 +1,149 @@
+---
+- name: Provisionamento e Automação do Projeto Korp
+  hosts: all
+  become: yes
+  vars:
+    # Diretório onde o projeto será implantado no servidor de destino
+    project_dir: "/opt/projeto-korp"
+
+  tasks:
+    # --- PARTE 1: Instalação do Docker (Ubuntu/Debian) ---
+    - name: Atualizar cache de pacotes (APT)
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+      when: ansible_os_family == "Debian"
+
+    - name: Instalar pacotes de dependências do Docker
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - software-properties-common
+          - python3-pip
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Adicionar chave GPG oficial do Docker
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Adicionar repositório APT do Docker
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Instalar Docker e o plugin do Docker Compose
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Garantir que o serviço do Docker está ativo e habilitado
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    # --- PARTE 2: Criação da Rede Docker ---
+    - name: Criar rede Docker no modo bridge
+      docker_network:
+        name: korp-network
+        driver: bridge
+        state: present
+      ignore_errors: yes
+      register: docker_net_module
+
+    # Comando de fallback se o módulo docker_network do Ansible falhar ou não tiver a SDK do Docker no python
+    - name: Criar rede Docker bridge (Fallback via CLI)
+      command: docker network create --driver bridge korp-network
+      register: network_create_fallback
+      when: docker_net_module is failed
+      failed_when: false
+      changed_when: "'already exists' not in network_create_fallback.stderr and network_create_fallback.rc == 0"
+
+    # --- PARTE 3: Copiar Arquivos do Projeto ---
+    - name: Criar estrutura de diretórios no servidor
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ project_dir }}"
+        - "{{ project_dir }}/app"
+        - "{{ project_dir }}/infra"
+        - "{{ project_dir }}/infra/nginx"
+        - "{{ project_dir }}/infra/prometheus"
+        - "{{ project_dir }}/infra/grafana"
+        - "{{ project_dir }}/infra/grafana/datasources"
+        - "{{ project_dir }}/infra/grafana/dashboards"
+
+    - name: Copiar arquivos de código da aplicação Go
+      copy:
+        src: "app/{{ item }}"
+        dest: "{{ project_dir }}/app/{{ item }}"
+        mode: '0644'
+      loop:
+        - main.go
+        - go.mod
+        - Dockerfile
+
+    - name: Copiar configurações de infraestrutura (Nginx/Prometheus/Grafana)
+      copy:
+        src: "infra/{{ item.src }}"
+        dest: "{{ project_dir }}/infra/{{ item.dest }}"
+        mode: '0644'
+      loop:
+        - { src: 'nginx/http-server-projeto-korp.conf', dest: 'nginx/http-server-projeto-korp.conf' }
+        - { src: 'prometheus/prometheus.yml', dest: 'prometheus/prometheus.yml' }
+        - { src: 'grafana/datasources/datasource.yml', dest: 'grafana/datasources/datasource.yml' }
+        - { src: 'grafana/dashboards/dashboard.yml', dest: 'grafana/dashboards/dashboard.yml' }
+        - { src: 'grafana/dashboards/dashboard.json', dest: 'grafana/dashboards/dashboard.json' }
+
+    - name: Copiar arquivo Docker Compose
+      copy:
+        src: docker-compose.yml
+        dest: "{{ project_dir }}/docker-compose.yml"
+        mode: '0644'
+
+    # --- PARTE 4: Build da Imagem e Start da Infraestrutura ---
+    - name: Buildar imagem Docker da aplicação Go
+      command: docker compose build
+      args:
+        chdir: "{{ project_dir }}"
+      changed_when: true
+
+    - name: Subir containers via Docker Compose (-d)
+      command: docker compose up -d
+      args:
+        chdir: "{{ project_dir }}"
+      changed_when: true
+
+    # --- PARTE 5: Validação do Funcionamento ---
+    - name: Aguardar inicialização do proxy reverso do NGINX na porta 80
+      wait_for:
+        port: 80
+        delay: 5
+        timeout: 45
+
+    - name: Testar endpoint do serviço HTTP via requisição local
+      uri:
+        url: http://localhost:80/projeto-korp
+        method: GET
+        return_content: yes
+        status_code: 200
+      register: http_response
+
+    - name: Exibir resposta do JSON do serviço Go no console
+      debug:
+        msg: "RESPOSTA HTTP RETORNADA COM SUCESSO: {{ http_response.content }}"
